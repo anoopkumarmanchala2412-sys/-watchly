@@ -1,0 +1,45 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Stores public profile information for each user.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "The unique identifier for the user." },
+        "displayName": { "type": "string", "description": "The user's display name." },
+        "photoURL": { "type": "string", "description": "The URL to the user's profile picture." },
+        "followersCount": { "type": "number", "description": "Number of followers." },
+        "followingCount": { "type": "number", "description": "Number of users followed." }
+      },
+      "required": ["uid", "displayName"]
+    },
+    "Reel": {
+      "title": "Short-form Video",
+      "description": "Represents a video post (reel).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique ID for the reel." },
+        "videoUrl": { "type": "string", "description": "URL to the video file." },
+        "caption": { "type": "string", "description": "The caption for the video." },
+        "authorUid": { "type": "string", "description": "UID of the user who posted the video." },
+        "authorName": { "type": "string", "description": "Display name of the author." },
+        "authorPhoto": { "type": "string", "description": "Profile picture URL of the author." },
+        "likesCount": { "type": "number", "description": "Total number of likes." },
+        "commentsCount": { "type": "number", "description": "Total number of comments." },
+        "viewsCount": { "type": "number", "description": "Total number of views." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp when the reel was created." }
+      },
+      "required": ["videoUrl", "authorUid", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile document."
+    },
+    "/reels/{reelId}": {
+      "schema": "Reel",
+      "description": "Short-form video document."
+    }
+  }
+}

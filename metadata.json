@@ -1,0 +1,8 @@
+{
+  "name": "Watchly",
+  "description": "Watchly is a short-form video sharing platform founded by Manchala Anoop Kumar (CEO), Devasani Abhiraama (MD), and Gandra Sanath (Chairperson). Features real-time interactions, profiles, and community engagement.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}

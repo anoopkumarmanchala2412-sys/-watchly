@@ -1,0 +1,154 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - uid: string (required) - The user's ID
+    //   - displayName: string (required) - Display name
+    //   - photoURL: string (optional) - Profile picture URL
+    //   - followersCount: number (required) - Count of followers
+    //   - followingCount: number (required) - Count of following
+    //
+    // Collection: reels
+    // Document ID: {reelId}
+    // Fields:
+    //   - videoUrl: string (required) - URL to video
+    //   - caption: string (optional) - Video caption
+    //   - authorUid: string (required) - UID of poster
+    //   - authorName: string (required) - Name of poster
+    //   - authorPhoto: string (optional) - Photo of poster
+    //   - likesCount: number (required) - Total likes
+    //   - commentsCount: number (required) - Total comments
+    //   - viewsCount: number (optional) - Total views
+    //   - createdAt: timestamp (required) - Creation time
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.authorUid;
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidUrl(url) {
+      return url is string && (url.matches("^https://.*") || url.matches("^http://.*"));
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['uid', 'displayName', 'photoURL', 'followersCount', 'followingCount']) &&
+             data.uid is string && data.uid.size() > 0 && data.uid.size() < 128 &&
+             data.displayName is string && data.displayName.size() > 0 && data.displayName.size() < 50 &&
+             (data.photoURL == null || isValidUrl(data.photoURL)) &&
+             data.followersCount is number && data.followersCount >= 0 &&
+             data.followingCount is number && data.followingCount >= 0;
+    }
+
+    function isValidReel(data) {
+      return hasOnlyAllowedFields(['videoUrl', 'caption', 'authorUid', 'authorName', 'authorPhoto', 'likesCount', 'commentsCount', 'viewsCount', 'createdAt']) &&
+             isValidUrl(data.videoUrl) &&
+             (data.caption == null || (data.caption is string && data.caption.size() < 500)) &&
+             data.authorUid is string && data.authorUid == request.auth.uid &&
+             data.authorName is string && data.authorName.size() > 0 && data.authorName.size() < 50 &&
+             (data.authorPhoto == null || isValidUrl(data.authorPhoto)) &&
+             data.likesCount is number && data.likesCount >= 0 &&
+             data.commentsCount is number && data.commentsCount >= 0 &&
+             (data.viewsCount == null || (data.viewsCount is number && data.viewsCount >= 0)) &&
+             data.createdAt is timestamp;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      // Public profiles are readable by any authenticated user
+      allow read: if isAuthenticated();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
+                      request.resource.data.uid == resource.data.uid;
+    }
+
+    match /reels/{reelId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && isValidReel(request.resource.data);
+      allow update: if isAuthenticated() && (
+        // Owner can update everything (caption, etc)
+        (isDocOwner() && isValidReel(request.resource.data) && request.resource.data.authorUid == resource.data.authorUid) ||
+        // Others can only increment/decrement likesCount or commentsCount
+        // This requires a corresponding document in the subcollection to be created/deleted in the same batch
+        (request.resource.data.diff(resource.data).affectedKeys().hasAny(['likesCount', 'commentsCount']) &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likesCount', 'commentsCount']) &&
+         (
+           // Like increment: must create a document in /likes/{uid}
+           (request.resource.data.likesCount == resource.data.likesCount + 1 &&
+            !exists(/databases/$(database)/documents/reels/$(reelId)/likes/$(request.auth.uid)) &&
+            getAfter(/databases/$(database)/documents/reels/$(reelId)/likes/$(request.auth.uid)) != null) ||
+           // Like decrement: must delete a document in /likes/{uid}
+           (request.resource.data.likesCount == resource.data.likesCount - 1 &&
+            exists(/databases/$(database)/documents/reels/$(reelId)/likes/$(request.auth.uid)) &&
+            getAfter(/databases/$(database)/documents/reels/$(reelId)/likes/$(request.auth.uid)) == null) ||
+           // Comment increment: must create a document in /comments/{commentId}
+           (request.resource.data.commentsCount == resource.data.commentsCount + 1) ||
+           // No change to this specific field
+           (request.resource.data.likesCount == resource.data.likesCount && 
+            request.resource.data.commentsCount == resource.data.commentsCount)
+         ))
+      );
+      allow delete: if isDocOwner();
+
+      // Subcollections
+      match /likes/{userId} {
+        allow read: if true;
+        allow write: if isOwner(userId);
+      }
+
+      match /comments/{commentId} {
+        allow read: if true;
+        allow create: if isAuthenticated() && 
+                        request.resource.data.userId == request.auth.uid &&
+                        request.resource.data.text is string &&
+                        request.resource.data.text.size() > 0 &&
+                        request.resource.data.text.size() < 500;
+        allow delete: if isAuthenticated() && 
+                        (resource.data.userId == request.auth.uid || get(/databases/$(database)/documents/reels/$(reelId)).data.authorUid == request.auth.uid);
+      }
+    }
+
+    // Default deny
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}
